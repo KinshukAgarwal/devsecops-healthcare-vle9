@@ -22,9 +22,11 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           // sonar-scanner; qualitygate.wait=true fails the build if the Quality Gate fails
+          // memory-capped for the 2 GB host: small scanner heap, the image's own Node.js for the JS analyzer
           sh '''docker run --rm --network host -u $(id -u):$(id -g) -e SONAR_HOST_URL=$SONAR_HOST -e SONAR_TOKEN \
-                  -v "$WORKSPACE":/usr/src sonarsource/sonar-scanner-cli \
-                  -Dsonar.projectVersion=$BUILD_NUMBER -Dsonar.qualitygate.wait=true -Dsonar.qualitygate.timeout=300'''
+                  -e SONAR_SCANNER_JAVA_OPTS=-Xmx256m -v "$WORKSPACE":/usr/src sonarsource/sonar-scanner-cli \
+                  -Dsonar.projectVersion=$BUILD_NUMBER -Dsonar.qualitygate.wait=true -Dsonar.qualitygate.timeout=300 \
+                  -Dsonar.nodejs.executable=/usr/bin/node -Dsonar.javascript.node.maxspace=512 -Dsonar.ws.timeout=300'''
         }
       }
     }

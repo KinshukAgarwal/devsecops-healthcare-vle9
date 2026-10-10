@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: prometheus, namespace: monitoring }
+---
+# least privilege: Prometheus may only discover pods in the healthcare namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: prometheus-discovery, namespace: healthcare }
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: prometheus-discovery, namespace: healthcare }
+subjects: [{ kind: ServiceAccount, name: prometheus, namespace: monitoring }]
+roleRef: { kind: Role, name: prometheus-discovery, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: prometheus-config, namespace: monitoring }
+data:
+  prometheus.yml: |
+    global: { scrape_interval: 15s, evaluation_interval: 15s }
+    alerting:
+      alertmanagers: [{ static_configs: [{ targets: ["alertmanager:9093"] }] }]
+    rule_files: [/etc/prometheus/alert-rules.yml]
+    scrape_configs:
+      - job_name: prometheus
+        static_configs: [{ targets: ["localhost:9090"] }]
+      - job_name: healthcare-app
+        kubernetes_sd_configs: [{ role: pod, namespaces: { names: [healthcare] } }]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            regex: (.+);(.+)
+            replacement: $1:$2
+            target_label: __address__
+          - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
+  alert-rules.yml: |
+    groups:
+      - name: healthcare-security
+        rules:
+          - alert: FailedLoginSpike
+            expr: sum(increase(failed_login_total[2m])) > 5
+            labels: { severity: critical, category: security }
+            annotations:
+              summary: Possible brute-force attack on /login
+              description: '{{ printf "%.0f" $value }} failed logins in the last 2 minutes (threshold 5).'
+          - alert: UnauthorizedAccessSpike
+            expr: sum(rate(http_requests_total{status=~"401|403", route!="/login"}[2m])) * 60 > 10
+            labels: { severity: warning, category: security }
+            annotations:
+              summary: Unauthorized access attempts on patient records API
+              description: '{{ printf "%.1f" $value }} requests/min rejected with 401/403 (threshold 10).'
+          - alert: HighCPUUsage
+            expr: max by (pod) (rate(process_cpu_seconds_total{job="healthcare-app"}[1m])) > 0.3
+            for: 30s
+            labels: { severity: warning, category: performance }
+            annotations:
+              summary: 'High CPU on {{ $labels.pod }}'
+              description: '{{ printf "%.2f" $value }} cores used (threshold 0.3; container limit 0.5).'
+          - alert: HealthcareAppDown
+            expr: up{job="healthcare-app"} == 0
+            for: 1m
+            labels: { severity: critical, category: availability }
+            annotations:
+              summary: 'Scrape target {{ $labels.pod }} is down'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: prometheus, namespace: monitoring }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata: { labels: { app: prometheus } }
+    spec:
+      serviceAccountName: prometheus
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0
+          args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=12h", "--web.enable-lifecycle"]
+          ports: [{ containerPort: 9090 }]
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          resources: { requests: { cpu: 50m, memory: 100Mi }, limits: { cpu: 500m, memory: 300Mi } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus }
+            - { name: data, mountPath: /prometheus }
+      volumes:
+        - { name: config, configMap: { name: prometheus-config } }
+        - { name: data, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: prometheus, namespace: monitoring }
+spec:
+  type: NodePort
+  selector: { app: prometheus }
+  ports: [{ port: 9090, targetPort: 9090, nodePort: 30090 }]
