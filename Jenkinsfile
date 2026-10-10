@@ -22,12 +22,13 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           // sonar-scanner; qualitygate.wait=true fails the build if the Quality Gate fails
-          // memory-capped for the 2 GB host: small scanner heap, the image's own Node.js for the JS analyzer
+          // memory-capped for the 2 GB host: small scanner heap, image Node.js, no type-checking,
+          // and a 300 s (ms value) JS-bridge lease timeout because swapping makes the default 15 s too short
           sh '''docker run --rm --network host -u $(id -u):$(id -g) -e SONAR_HOST_URL=$SONAR_HOST -e SONAR_TOKEN \
                   -e SONAR_SCANNER_JAVA_OPTS=-Xmx256m -v "$WORKSPACE":/usr/src sonarsource/sonar-scanner-cli \
                   -Dsonar.projectVersion=$BUILD_NUMBER -Dsonar.qualitygate.wait=true -Dsonar.qualitygate.timeout=300 \
                   -Dsonar.nodejs.executable=/usr/bin/node -Dsonar.javascript.node.maxspace=512 \
-                  -Dsonar.javascript.node.timeout=600 -Dsonar.javascript.disableTypeChecking=true -Dsonar.scanner.socketTimeout=300'''
+                  -Dsonar.javascript.node.timeout=300000 -Dsonar.javascript.disableTypeChecking=true -Dsonar.scanner.socketTimeout=300'''
         }
       }
     }
