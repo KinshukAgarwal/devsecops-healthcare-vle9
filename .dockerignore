@@ -1,0 +1,11 @@
+.git
+node_modules
+coverage
+.scannerwork
+k8s
+monitoring
+jenkins
+Jenkinsfile
+*.md
+.env*
+scripts

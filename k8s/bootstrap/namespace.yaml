@@ -1,0 +1,9 @@
+# Applied once by the cluster admin (not by Jenkins).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: healthcare
+  labels:
+    # Pod Security Admission: reject any pod that is not "restricted"-compliant
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

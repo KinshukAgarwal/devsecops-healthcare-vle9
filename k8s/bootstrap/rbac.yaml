@@ -1,0 +1,62 @@
+# Least-privilege identities (applied once by the cluster admin).
+# 1) The app's own identity: no API permissions at all, token not mounted.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: healthcare-app
+  namespace: healthcare
+automountServiceAccountToken: false
+---
+# 2) Identity used by Jenkins to deploy: may only roll out the app in this namespace.
+#    It cannot read Secrets, exec into pods, or touch any other namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-deployer
+  namespace: healthcare
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-deployer
+  namespace: healthcare
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]          # read-only (Trivy KSV-0056)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer-binding
+  namespace: healthcare
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-deployer
+    namespace: healthcare
+roleRef:
+  kind: Role
+  name: app-deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+# Long-lived token for the deployer SA (copied into a Jenkins file credential)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jenkins-deployer-token
+  namespace: healthcare
+  annotations:
+    kubernetes.io/service-account.name: jenkins-deployer
+type: kubernetes.io/service-account-token

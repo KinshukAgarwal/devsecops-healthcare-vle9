@@ -1,0 +1,19 @@
+{
+  "name": "healthcare-patient-api",
+  "version": "1.0.0",
+  "description": "Synthetic patient-records API for the VLE-9 DevSecOps lab (no real PHI)",
+  "main": "src/server.js",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "coverage": "mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "prom-client": "^15.1.3"
+  }
+}

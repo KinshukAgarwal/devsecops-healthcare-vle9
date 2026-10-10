@@ -1,0 +1,12 @@
+# Applied once by the cluster admin. The Jenkins deployer may not create/modify Services
+# (Trivy KSV-0056: control over Services allows traffic interception).
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthcare-app
+  namespace: healthcare
+spec:
+  type: NodePort          # reachable only on the EC2 itself; the security group allows SSH only
+  selector: { app: healthcare-app }
+  ports:
+    - { port: 80, targetPort: http, nodePort: 30080 }

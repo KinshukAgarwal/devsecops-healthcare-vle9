@@ -1,0 +1,67 @@
+# Applied by the Jenkins "Deploy" stage with the jenkins-deployer ServiceAccount.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: healthcare-config
+  namespace: healthcare
+data:
+  AUTH_USERNAME: dr.lab        # not a secret; the password comes from app-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcare-app
+  namespace: healthcare
+  labels: { app: healthcare-app }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: healthcare-app }
+  template:
+    metadata:
+      labels: { app: healthcare-app }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+    spec:
+      serviceAccountName: healthcare-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: healthcare-app:latest     # Jenkins replaces the tag with the build number
+          imagePullPolicy: IfNotPresent      # image is built on this node (k3s uses the Docker runtime)
+          ports: [{ containerPort: 3000, name: http }]
+          envFrom:
+            - configMapRef: { name: healthcare-config }
+          env:
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-secret, key: password } }
+            - name: AUTH_PASSWORD
+              valueFrom: { secretKeyRef: { name: app-secret, key: auth-password } }
+            - name: SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: app-secret, key: session-secret } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
